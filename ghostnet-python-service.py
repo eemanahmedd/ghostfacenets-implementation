@@ -13,11 +13,14 @@ from dotenv import load_dotenv
 
 evaluator = None
 known_faces = None
+model_loaded = False
 
 class EvalSingleImage:
     def __init__(self, model_interf):
+        global model_loaded
         if isinstance(model_interf, str) and model_interf.endswith(".h5"):
             self.model = tf.keras.models.load_model(model_interf, compile=False)
+            model_loaded = True
             self.detector = MTCNN()
         else:
             self.model = model_interf
@@ -67,7 +70,7 @@ class EvalSingleImage:
             return None
 
 def get_known_embeddings(upload_folder, evaluator):
-    known_faces = {}
+    local_known_faces = {}
 
     for people in os.listdir(upload_folder):
         people_dir = os.path.join(upload_folder, people)
@@ -86,8 +89,8 @@ def get_known_embeddings(upload_folder, evaluator):
             else:
                 print(f"No faces found in {filename}")
 
-        known_faces[people] = encoding_list
-    return known_faces
+        local_known_faces[people] = encoding_list
+    return local_known_faces
 
 def convert_numpy_float32(obj):
     if isinstance(obj, np.float32):
@@ -109,9 +112,21 @@ if known_faces is None:
     
 app = Flask(__name__)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    global model_loaded
+    if model_loaded:
+        return jsonify(status='ok', message='Model is ready'), 200
+    else:
+        return jsonify(status='not ready', message='Model is still loading'), 503
+
 @app.route('/process_frame', methods=['POST'])
 def process_frame():
     start_time = time.time()
+    global model_loaded
+
+    if not model_loaded:
+        return jsonify(status='not ready', message='Model is still loading'), 503
 
     if request.method == 'POST':
         # Assuming the frame data is sent in the request
@@ -121,6 +136,10 @@ def process_frame():
 
         # Calculate embeddings using your face recognition module
         face_embedding = evaluator.get_embeddings(face)
+
+        # person_list = []
+        # filename_list = []
+        # similarity_list = []
         result_list = []
 
         # Compare with known embeddings
@@ -129,6 +148,10 @@ def process_frame():
                 filename = file_dict['filename']
                 embedding = file_dict['embedding']
                 similarity = evaluator.dist_func(embedding, face_embedding)
+
+                # person_list.append(person)
+                # filename_list.append(filename)
+                # similarity_list.append(float(similarity))
 
                 temp_dict = {'person': person, 'filename': filename, 'similarity': float(similarity)}
                 result_list.append(temp_dict)
